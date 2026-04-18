@@ -104,6 +104,7 @@ ReSpeaker ch4          ~0.5s latency          ~10s / 50 tokens           ~2s / s
 | 8 | `test_pipeline.py` hardcoded `WhisperModel` ignoring config | Replaced with `Transcriber` service call so backend config is respected |
 | 9 | Piper TTS ALSA underrun warning | Synthesise to temp WAV file first, then play via `sounddevice` (not raw pipe to aplay) |
 | 10 | VS Code showing 117 pending items after push | False positive — VS Code git cache not refreshed after `.gitignore` update; run Git: Refresh in VS Code |
+| 11 | `tflite_runtime` crashes with NumPy 2.x (`_ARRAY_API not found`) | Switch openWakeWord to ONNX backend: `inference_framework="onnx"`. Both `.tflite` and `.onnx` models are downloaded — ONNX works with NumPy 2.x via onnxruntime. |
 
 ---
 

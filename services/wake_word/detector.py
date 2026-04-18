@@ -22,18 +22,18 @@ class WakeWordDetector:
         self._input_channel = cfg.get("input_channel", 0)
 
         model_path = cfg.get("model_path")
-        model_files = list(Path(model_path).glob("*.tflite")) if model_path else []
+        model_files = list(Path(model_path).glob("*.onnx")) if model_path else []
 
         openwakeword.utils.download_models()
 
         if model_files:
-            # Custom trained wake word model (.tflite file in models/wake_word/)
-            self._model = Model(wakeword_models=[str(model_files[0])], inference_framework="tflite")
+            # Custom trained wake word model (.onnx file in models/wake_word/)
+            self._model = Model(wakeword_models=[str(model_files[0])], inference_framework="onnx")
         else:
             # Built-in model — derive model name from wake_word string
-            # e.g. "hey jarvis" → "hey_jarvis_v0.1" or pass the name directly
+            # e.g. "hey jarvis" → "hey_jarvis"
             ww_name = self._wake_word.lower().replace(" ", "_")
-            self._model = Model(wakeword_models=[ww_name], inference_framework="tflite")
+            self._model = Model(wakeword_models=[ww_name], inference_framework="onnx")
 
         log.info("Wake word detector loaded (threshold=%.2f)", self._threshold)
 
