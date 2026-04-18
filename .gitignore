@@ -1,7 +1,36 @@
 .venv/
 __pycache__/
 *.pyc
+*.pyo
 .env
 logs/
 .ipynb_checkpoints/
 .vscode/
+.claude/
+
+# Large model files — download separately, do not commit
+models/LLM/**/*.gguf
+models/STT/**
+models/TTS/**/*.onnx
+models/wake_word/**/*.tflite
+models/wake_word/**/*.onnx
+
+# External repos and pre-built binaries — cloned/downloaded locally, not tracked
+llama.cpp/
+whisper.cpp/
+CTranslate2/
+services/piper/
+
+# Large model files — download separately, do not commit
+models/LLM/**/*.gguf
+models/STT/**
+models/TTS/**/*.onnx
+models/wake_word/**/*.tflite
+models/wake_word/**/*.onnx
+
+# PulseAudio / audio state
+*.tdb
+
+# Temp files
+*.incomplete
+*.lock

@@ -1,0 +1,53 @@
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_duration_ms: 80
+  silence_threshold_seconds: 1.5
+  # ReSpeaker XVF3800 4-Mic Array (index 24, channel 4 = beamformed/processed output)
+  input_device_index: 24
+  input_channel: 4
+  output_device_index: null
+
+wake_word:
+  model_path: "models/wake_word/"
+  wake_word: "hey jarvis"
+  threshold: 0.5
+  input_device_index: 24
+  input_channel: 4
+  # Lower threshold = more sensitive, higher = fewer false positives
+  # "hey jarvis" is a built-in openWakeWord model — replace with custom "hey ivona" once trained
+
+stt:
+  backend: "whisper_cpp"
+  whisper_cpp_binary: "whisper.cpp/build/bin/whisper-cli"
+  whisper_cpp_model: "models/STT/ggml-medium.en.bin"
+  model_size: "base"              # used only if backend=faster_whisper
+  model_dir: "models/STT/"
+  language: "en"
+  device: "cuda"
+  compute_type: "float16"
+  input_device_index: 24
+  input_channel: 4
+  silence_threshold_seconds: 1.5
+
+llm:
+  backend: "llama_cpp_python"     # "llama_cli" (subprocess) or "llama_cpp_python"
+  model_path: "models/LLM/qwen_2_5/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+  n_gpu_layers: 20
+  context_length: 2048
+  max_tokens: 512
+  temperature: 0.7
+  system_prompt: >
+    You are Ivona, a friendly and knowledgeable AI assistant at the AI Conference for Good.
+    You answer questions about artificial intelligence and how it can benefit society.
+    Keep your answers concise and conversational — visitors are standing and listening.
+    If you don't know something, say so honestly.
+
+tts:
+  binary_path: "services/piper/piper/piper"
+  model_path: "models/TTS/en_US-amy-medium.onnx"
+  speaking_rate: 1.0
+
+logging:
+  level: "INFO"
+  file: "logs/ivona.log"

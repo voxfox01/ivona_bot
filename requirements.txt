@@ -1,0 +1,20 @@
+# Audio I/O
+sounddevice==0.5.5
+soundfile==0.13.1
+
+# Speech-to-text
+faster-whisper==1.2.1
+
+# Wake word detection
+openwakeword==0.6.0
+
+# LLM inference (llama.cpp Python bindings — install separately with CUDA flags)
+# llama-cpp-python  (see scripts/install_llama_cpp_python.sh)
+
+# Utilities
+numpy
+python-dotenv
+PyYAML
+rich
+huggingface_hub
+requests
