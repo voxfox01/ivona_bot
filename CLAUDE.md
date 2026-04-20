@@ -15,7 +15,7 @@ Deploy a fully **offline** LLM-powered conversational robot on an NVIDIA Jetson 
 |---|---|
 | Compute | Jetson Orin Nano Super — 8GB unified RAM/VRAM, Ampere GPU (sm_87), CUDA 12.6, JetPack 6.1 (L4T 36.5.0) |
 | Storage | 1TB NVMe SSD on M.2 2280 (OS installed here) |
-| Microphone | ReSpeaker XMOS XVF3800 4-Mic Array — sounddevice index 24, channel 4 (beamformed output), 16kHz |
+| Microphone | ReSpeaker XMOS XVF3800 4-Mic Array — sounddevice index 0 (hw:0,0), channel 0 (highest gain), 6ch 16kHz |
 | Speaker | Bluetooth BM4D — A2DP profile (44.1kHz stereo), auto-connects on boot |
 | Dev machine | Windows laptop → VS Code SSH → Jetson |
 
@@ -24,8 +24,8 @@ Deploy a fully **offline** LLM-powered conversational robot on an NVIDIA Jetson 
 ## Pipeline architecture
 ```
 openWakeWord (CPU)  →  whisper.cpp (GPU)  →  llama-cpp-python (GPU)  →  Piper TTS (CPU)
-"hey jarvis"            ggml-medium.en         Qwen2.5-7B Q4KM           en_US-amy-medium
-ReSpeaker ch4          ~0.5s latency          ~10s / 50 tokens           ~2s / sentence
+"hey jarvis"            ggml-base.en           Qwen2.5-7B Q4KM           en_US-amy-medium
+ReSpeaker ch0          ~0.5s latency          ~10s / 50 tokens           ~2s / sentence
 ```
 
 ---
@@ -41,7 +41,7 @@ ReSpeaker ch4          ~0.5s latency          ~10s / 50 tokens           ~2s / s
 | `services/tts/speaker.py` | Piper TTS → sounddevice playback |
 | `scripts/test_pipeline.py` | Per-service smoke tests (`--skip-wake/stt/llm/tts`) |
 | `models/LLM/qwen_2_5/` | Qwen2.5-7B Q4KM split GGUF (2 files, ~4.4GB total) |
-| `models/STT/ggml-medium.en.bin` | Whisper medium GGML model (176MB) |
+| `models/STT/ggml-base.en.bin` | Whisper base GGML model (142MB) — switched from medium (1.5GB) to avoid OOM with LLM co-resident |
 | `models/TTS/en_US-amy-medium.onnx` | Piper voice model (61MB, not in git) |
 | `llama.cpp/build/bin/` | Built llama-cli + libggml-cuda.so |
 | `whisper.cpp/build/bin/whisper-cli` | Built whisper-cli binary |

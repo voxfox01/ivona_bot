@@ -3,31 +3,31 @@ audio:
   channels: 1
   chunk_duration_ms: 80
   silence_threshold_seconds: 1.5
-  # ReSpeaker XVF3800 4-Mic Array (index 24, channel 4 = beamformed/processed output)
-  input_device_index: 24
-  input_channel: 4
+  # ReSpeaker XVF3800 4-Mic Array (index 0, channel 4 = beamformed/processed output)
+  input_device_index: 0
+  input_channel: 0
   output_device_index: null
 
 wake_word:
   model_path: "models/wake_word/"
   wake_word: "hey jarvis"
   threshold: 0.5
-  input_device_index: 24
-  input_channel: 4
+  input_device_index: 0
+  input_channel: 0
   # Lower threshold = more sensitive, higher = fewer false positives
   # "hey jarvis" is a built-in openWakeWord model — replace with custom "hey ivona" once trained
 
 stt:
   backend: "whisper_cpp"
   whisper_cpp_binary: "whisper.cpp/build/bin/whisper-cli"
-  whisper_cpp_model: "models/STT/ggml-medium.en.bin"
+  whisper_cpp_model: "models/STT/ggml-base.en.bin"
   model_size: "base"              # used only if backend=faster_whisper
   model_dir: "models/STT/"
   language: "en"
   device: "cuda"
   compute_type: "float16"
-  input_device_index: 24
-  input_channel: 4
+  input_device_index: 0
+  input_channel: 0
   silence_threshold_seconds: 1.5
 
 llm:

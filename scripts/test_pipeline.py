@@ -33,15 +33,40 @@ def test_tts(cfg):
 
 
 def test_stt(cfg):
-    log.info("=== STT TEST (5 seconds — speak now) ===")
+    import time
+    import numpy as np
+    log.info("=== STT TEST ===")
     from services.stt.transcriber import Transcriber
     stt = Transcriber(cfg["stt"])
+
+    # Fixed 5-second recording with countdown so mic captures real speech
+    log.info("Recording in 3...")
+    time.sleep(1)
+    log.info("Recording in 2...")
+    time.sleep(1)
+    log.info("Recording in 1...")
+    time.sleep(1)
+    log.info("RECORDING NOW — speak your question (5 seconds)...")
     audio = stt.record_until_silence(max_seconds=5.0)
-    if audio is None:
+    log.info("Recording complete.")
+
+    if audio is None or len(audio) == 0:
         log.warning("No audio captured.")
         return ""
+
+    duration = len(audio) / 16000
+    rms = float(np.sqrt(np.mean(audio ** 2)))
+    peak = float(np.max(np.abs(audio)))
+    log.info("Audio: %.2f seconds | RMS=%.4f | Peak=%.4f", duration, rms, peak)
+    if rms < 0.005:
+        log.warning("Audio level very low — check mic selection (input_device_index/input_channel in settings.yaml)")
+
+    log.info("Sending to STT model...")
     text = stt.transcribe(audio)
-    log.info("Transcript: '%s'", text)
+
+    print("\n" + "=" * 60)
+    print(f"  TRANSCRIPT: {text!r}")
+    print("=" * 60 + "\n")
     log.info("STT OK")
     return text
 

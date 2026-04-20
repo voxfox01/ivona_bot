@@ -1,6 +1,8 @@
 import logging
+import re
 import subprocess
 from pathlib import Path
+from typing import Iterator
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +51,45 @@ class Responder:
         if self._backend == "llama_cpp_python":
             return self._generate_python(prompt)
         return self._generate_cli(prompt)
+
+    def stream_sentences(self, user_text: str) -> Iterator[str]:
+        """Stream the LLM response one sentence at a time.
+
+        Yields each sentence as soon as it is complete so the caller can
+        pipe it to TTS while the model continues generating the next one.
+        Falls back to a single chunk for the llama_cli backend.
+        """
+        prompt = _build_prompt(self._system_prompt, user_text)
+        if self._backend == "llama_cpp_python":
+            yield from self._stream_sentences_python(prompt)
+        else:
+            yield self._generate_cli(prompt)
+
+    def _stream_sentences_python(self, prompt: str) -> Iterator[str]:
+        stop_tokens = [_IM_END, _IM_START]
+        stream = self._llama(
+            prompt,
+            max_tokens=self._max_tokens,
+            temperature=self._temperature,
+            stop=stop_tokens,
+            echo=False,
+            stream=True,
+        )
+        buffer = ""
+        for chunk in stream:
+            token = chunk["choices"][0]["text"]
+            buffer += token
+            # Yield complete sentences as they accumulate
+            while True:
+                m = re.search(r'[.!?][\s"\')\]]*(?=\s|$)', buffer)
+                if not m:
+                    break
+                sentence = buffer[:m.end()].strip()
+                buffer = buffer[m.end():]
+                if sentence:
+                    yield sentence
+        if buffer.strip():
+            yield buffer.strip()
 
     def _generate_python(self, prompt: str) -> str:
         output = self._llama(
