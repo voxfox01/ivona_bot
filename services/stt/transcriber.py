@@ -16,10 +16,10 @@ SAMPLE_RATE = 16000
 
 class Transcriber:
     def __init__(self, cfg: dict):
-        self._input_channel = cfg.get("input_channel", 0)
         self._language = cfg.get("language", "en")
         self._silence_threshold = cfg.get("silence_threshold_seconds", 1.5)
         self._backend = cfg.get("backend", "faster_whisper")
+        self._pulse_source = cfg.get("pulse_source")  # None = PulseAudio default
 
         if self._backend == "whisper_cpp":
             self._whisper_bin = Path(cfg["whisper_cpp_binary"]).resolve()
@@ -49,14 +49,9 @@ class Transcriber:
         tmp_path = tmp.name
         tmp.close()
 
-        cmd = [
-            "parecord",
-            "--channels=1",
-            f"--rate={SAMPLE_RATE}",
-            "--format=s16le",
-            "--raw",
-            tmp_path,
-        ]
+        cmd = ["parecord", "--channels=1", f"--rate={SAMPLE_RATE}", "--format=s16le", "--raw", tmp_path]
+        if self._pulse_source:
+            cmd += [f"--device={self._pulse_source}"]
         proc = subprocess.Popen(cmd, stderr=subprocess.DEVNULL)
 
         chunk_size = 512

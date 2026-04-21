@@ -1,19 +1,16 @@
 audio:
   sample_rate: 16000
-  channels: 1
-  chunk_duration_ms: 80
-  silence_threshold_seconds: 1.5
-  # ReSpeaker XVF3800 4-Mic Array (index 0, channel 4 = beamformed/processed output)
-  input_device_index: 0
-  input_channel: 0
-  output_device_index: null
+  # PulseAudio source name for the ReSpeaker — used by both wake word and STT.
+  # Find yours with: pactl list sources short
+  # Leave blank to use the PulseAudio default source.
+  pulse_source: "alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993702260500419-00.multichannel-input"
+  output_device_index: null   # sounddevice output index; null = system default
 
 wake_word:
   model_path: "models/wake_word/"
   wake_word: "hey jarvis"
   threshold: 0.5
-  input_device_index: 0
-  input_channel: 0
+  pulse_source: "alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993702260500419-00.multichannel-input"
   # Lower threshold = more sensitive, higher = fewer false positives
   # "hey jarvis" is a built-in openWakeWord model — replace with custom "hey ivona" once trained
 
@@ -21,19 +18,22 @@ stt:
   backend: "whisper_cpp"
   whisper_cpp_binary: "whisper.cpp/build/bin/whisper-cli"
   whisper_cpp_model: "models/STT/ggml-base.en.bin"
+  # whisper-cli runs CPU-only (CUDA disabled) so it doesn't compete with the
+  # resident LLM for GPU memory. base.en (142MB) fits comfortably alongside
+  # Qwen2.5-7B. Use ggml-small.en.bin for better accuracy if memory allows.
   model_size: "base"              # used only if backend=faster_whisper
   model_dir: "models/STT/"
   language: "en"
-  device: "cuda"
-  compute_type: "float16"
-  input_device_index: 0
-  input_channel: 0
+  device: "cpu"
+  compute_type: "int8"
+  pulse_source: "alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993702260500419-00.multichannel-input"
   silence_threshold_seconds: 1.5
 
 llm:
   backend: "llama_cpp_python"     # "llama_cli" (subprocess) or "llama_cpp_python"
   model_path: "models/LLM/qwen_2_5/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
   n_gpu_layers: 20
+  # Safe limit is 20 with ggml-base STT co-resident. Max is 28 on 8GB Orin Nano.
   context_length: 2048
   max_tokens: 512
   temperature: 0.7

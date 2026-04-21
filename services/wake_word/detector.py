@@ -4,7 +4,6 @@ import threading
 from pathlib import Path
 
 import numpy as np
-import openwakeword
 from openwakeword.model import Model
 
 log = logging.getLogger(__name__)
@@ -18,15 +17,16 @@ class WakeWordDetector:
     def __init__(self, cfg: dict):
         self._threshold = cfg.get("threshold", 0.5)
         self._wake_word = cfg.get("wake_word", "hey jarvis")
+        self._pulse_source = cfg.get("pulse_source")  # None = PulseAudio default
 
         model_path = cfg.get("model_path")
         model_files = list(Path(model_path).glob("*.onnx")) if model_path else []
 
-        openwakeword.utils.download_models()
-
         if model_files:
             self._model = Model(wakeword_models=[str(model_files[0])], inference_framework="onnx")
         else:
+            # Built-in models (hey_jarvis, alexa, etc.) are bundled with the
+            # openwakeword package — no network access needed at runtime.
             ww_name = self._wake_word.lower().replace(" ", "_")
             self._model = Model(wakeword_models=[ww_name], inference_framework="onnx")
 
@@ -36,14 +36,9 @@ class WakeWordDetector:
         """Block until the configured wake word is detected, reading audio via PulseAudio."""
         detected = threading.Event()
 
-        # Stream raw s16le mono 16kHz from PulseAudio default source (ReSpeaker)
-        cmd = [
-            "parecord",
-            "--channels=1",
-            f"--rate={SAMPLE_RATE}",
-            "--format=s16le",
-            "--raw",
-        ]
+        cmd = ["parecord", "--channels=1", f"--rate={SAMPLE_RATE}", "--format=s16le", "--raw"]
+        if self._pulse_source:
+            cmd += [f"--device={self._pulse_source}"]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
         def _detect():
@@ -67,7 +62,7 @@ class WakeWordDetector:
                                 log.debug("Wake word '%s' score: %.3f", label, score)
                                 detected.set()
 
-                # Flush ~1s of audio through the model to reset internal state
+                # Flush ~1s of silence through the model to reset internal state
                 # so it doesn't immediately re-trigger on the next call.
                 flush_frames = SAMPLE_RATE // CHUNK_SAMPLES
                 silence = np.zeros(CHUNK_SAMPLES, dtype=np.int16)

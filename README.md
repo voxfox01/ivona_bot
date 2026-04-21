@@ -17,11 +17,13 @@ A fully **offline** LLM-powered conversational voice assistant running on an NVI
 │  ┌─────────────┐    ┌──────────────┐    ┌────────────┐    ┌──────┐ │
 │  │  Wake Word  │───▶│     STT      │───▶│    LLM     │───▶│ TTS  │ │
 │  │openWakeWord │    │ whisper.cpp  │    │llama-cpp-  │    │Piper │ │
-│  │   (CPU)     │    │   (GPU)      │    │python(GPU) │    │(CPU) │ │
+│  │   (CPU)     │    │   (CPU)*     │    │python(GPU) │    │(CPU) │ │
 │  │             │    │              │    │            │    │      │ │
 │  │ "hey jarvis"│    │ggml-base.en  │    │Qwen2.5-7B  │    │amy-  │ │
-│  │  ONNX model │    │  ~0.5s       │    │Q4KM ~9s    │    │medium│ │
+│  │  ONNX model │    │  ~2-3s       │    │Q4KM ~9s    │    │medium│ │
 │  └─────────────┘    └──────────────┘    └────────────┘    └──────┘ │
+│                           * CUDA disabled so whisper-cli doesn't    │
+│                             compete with LLM for unified memory     │
 │                                                │                    │
 │                                         Streaming:                  │
 │                                    sentence 1 → TTS                 │

@@ -11,6 +11,7 @@ import argparse
 import logging
 import queue
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -34,25 +35,6 @@ def load_config() -> dict:
         return yaml.safe_load(f)
 
 
-def _keep_mic_active() -> None:
-    """Prevent PulseAudio from suspending the ReSpeaker source.
-    Without this, the source suspends between recordings and takes ~1-2s to
-    wake up, causing parecord to return silence until it's fully active."""
-    import subprocess
-    result = subprocess.run(["pactl", "list", "sources", "short"],
-                            capture_output=True, text=True)
-    for line in result.stdout.splitlines():
-        if "respeaker" in line.lower() or "xvf3800" in line.lower():
-            source_index = line.split()[0]
-            subprocess.run(["pactl", "suspend-source", source_index, "0"],
-                           capture_output=True)
-            logging.getLogger("ivona").info(
-                "ReSpeaker source %s kept active (suspend disabled)", source_index)
-            return
-    logging.getLogger("ivona").warning(
-        "ReSpeaker PulseAudio source not found — mic may suspend between turns")
-
-
 def setup_logging(cfg: dict) -> None:
     log_cfg = cfg.get("logging", {})
     log_file = ROOT / log_cfg.get("file", "logs/ivona.log")
@@ -65,6 +47,68 @@ def setup_logging(cfg: dict) -> None:
             logging.FileHandler(log_file),
         ],
     )
+
+
+def preflight_check(cfg: dict) -> None:
+    """Fail fast with a clear message if any required binary or model is missing."""
+    log = logging.getLogger("ivona.preflight")
+    errors = []
+
+    checks = [
+        (ROOT / cfg["stt"]["whisper_cpp_binary"],  "whisper-cli binary (build whisper.cpp)"),
+        (ROOT / cfg["stt"]["whisper_cpp_model"],   "Whisper model (run: whisper.cpp/models/download-ggml-model.sh base.en)"),
+        (ROOT / cfg["tts"]["binary_path"],          "Piper binary (run: bash scripts/install_piper.sh)"),
+        (ROOT / cfg["tts"]["model_path"],           "Piper voice model (run: bash scripts/install_piper.sh)"),
+    ]
+
+    # LLM: split GGUF — check the first file
+    llm_path = ROOT / cfg["llm"]["model_path"]
+    checks.append((llm_path, f"LLM model {llm_path.name} (download from HuggingFace — see README)"))
+
+    for path, description in checks:
+        if not path.exists():
+            errors.append(f"  MISSING: {path}\n    → {description}")
+
+    # Check parecord is available
+    if subprocess.run(["which", "parecord"], capture_output=True).returncode != 0:
+        errors.append("  MISSING: parecord\n    → Install PulseAudio: sudo apt install pulseaudio-utils")
+
+    if errors:
+        log.error("Preflight check failed — cannot start:\n%s", "\n".join(errors))
+        sys.exit(1)
+
+    log.info("Preflight check passed.")
+
+
+def _keep_mic_active(pulse_source: str | None) -> None:
+    """Prevent PulseAudio from suspending the ReSpeaker source between turns."""
+    log = logging.getLogger("ivona")
+
+    if pulse_source:
+        # Use the configured source name directly
+        result = subprocess.run(["pactl", "list", "sources", "short"],
+                                capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            if pulse_source in line:
+                source_index = line.split()[0]
+                subprocess.run(["pactl", "suspend-source", source_index, "0"],
+                               capture_output=True)
+                log.info("Mic source '%s' kept active (suspend disabled)", pulse_source)
+                return
+        log.warning("Configured pulse_source '%s' not found in pactl output", pulse_source)
+        return
+
+    # Auto-detect ReSpeaker
+    result = subprocess.run(["pactl", "list", "sources", "short"],
+                            capture_output=True, text=True)
+    for line in result.stdout.splitlines():
+        if "respeaker" in line.lower() or "xvf3800" in line.lower():
+            source_index = line.split()[0]
+            subprocess.run(["pactl", "suspend-source", source_index, "0"],
+                           capture_output=True)
+            log.info("ReSpeaker source %s kept active (suspend disabled)", source_index)
+            return
+    log.warning("ReSpeaker PulseAudio source not found — mic may suspend between turns")
 
 
 def stt_debug_print(audio: np.ndarray, transcript: str) -> None:
@@ -96,7 +140,11 @@ def main() -> None:
     log = logging.getLogger("ivona")
 
     log.info("Starting ivona_bot%s...", " [STT debug ON]" if args.debug_stt else "")
-    _keep_mic_active()
+
+    preflight_check(cfg)
+
+    pulse_source = cfg.get("wake_word", {}).get("pulse_source") or cfg.get("audio", {}).get("pulse_source")
+    _keep_mic_active(pulse_source)
 
     from services.wake_word.detector import WakeWordDetector
     from services.stt.transcriber import Transcriber
@@ -118,54 +166,68 @@ def main() -> None:
     log.info("Ready. Listening for wake word '%s'...", cfg["wake_word"]["wake_word"])
 
     while True:
-        wake.wait_for_wake_word()
-        log.info("Wake word detected. Listening for question...")
-        tts.speak("Yes?")
-        time.sleep(0.4)  # let speaker audio settle before mic opens
+        try:
+            wake.wait_for_wake_word()
+            log.info("Wake word detected. Listening for question...")
+            tts.speak("Yes?")
+            time.sleep(0.4)  # let speaker audio settle before mic opens
 
-        audio = stt.record_until_silence()
+            audio = stt.record_until_silence()
 
-        if audio is None or len(audio) < 8000:
+            if audio is None or len(audio) < 8000:
+                if args.debug_stt:
+                    print("\n[STT DEBUG] No audio captured (< 0.5s)\n")
+                log.warning("No question captured, resuming wake word detection.")
+                continue
+
+            transcript = stt.transcribe(audio)
+
             if args.debug_stt:
-                print("\n[STT DEBUG] No audio captured (< 0.5s)\n")
-            log.warning("No question captured, resuming wake word detection.")
-            continue
+                stt_debug_print(audio, transcript)
 
-        transcript = stt.transcribe(audio)
+            if not transcript.strip():
+                log.info("Empty transcript — resuming wake word detection.")
+                continue
 
-        if args.debug_stt:
-            stt_debug_print(audio, transcript)
+            log.info("User said: %s", transcript)
 
-        if not transcript.strip():
-            log.info("Empty transcript — resuming wake word detection.")
-            continue
+            # Streaming pipeline: LLM generates sentences in a background thread;
+            # TTS speaks each sentence as it arrives so the first word is heard
+            # ~2-3s after the question instead of waiting for the full response.
+            sentence_q: queue.Queue[str | None] = queue.Queue()
+            full_response: list[str] = []
 
-        log.info("User said: %s", transcript)
+            def _generate():
+                try:
+                    for sentence in llm.stream_sentences(transcript):
+                        log.debug("LLM sentence: %s", sentence)
+                        sentence_q.put(sentence)
+                except Exception as exc:
+                    log.error("LLM generation error: %s", exc)
+                finally:
+                    sentence_q.put(None)
 
-        # Streaming pipeline: LLM generates sentences in a background thread;
-        # TTS speaks each sentence as it arrives so the first word is heard
-        # ~2-3s after the question instead of waiting for the full response.
-        sentence_q: queue.Queue[str | None] = queue.Queue()
-        full_response: list[str] = []
+            gen_thread = threading.Thread(target=_generate, daemon=True)
+            gen_thread.start()
 
-        def _generate():
-            for sentence in llm.stream_sentences(transcript):
-                log.debug("LLM sentence: %s", sentence)
-                sentence_q.put(sentence)
-            sentence_q.put(None)  # sentinel
+            while True:
+                sentence = sentence_q.get()
+                if sentence is None:
+                    break
+                full_response.append(sentence)
+                try:
+                    tts.speak(sentence)
+                except Exception as exc:
+                    log.error("TTS error: %s", exc)
 
-        gen_thread = threading.Thread(target=_generate, daemon=True)
-        gen_thread.start()
+            gen_thread.join()
+            log.info("Response: %s", " ".join(full_response))
 
-        while True:
-            sentence = sentence_q.get()
-            if sentence is None:
-                break
-            full_response.append(sentence)
-            tts.speak(sentence)
-
-        gen_thread.join()
-        log.info("Response: %s", " ".join(full_response))
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:
+            log.error("Unexpected error during turn (recovering): %s", exc, exc_info=True)
+            time.sleep(1.0)  # brief pause before resuming wake word detection
 
 
 if __name__ == "__main__":
