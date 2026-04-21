@@ -10,6 +10,7 @@ Usage:
 import argparse
 import logging
 import queue
+import re
 import signal
 import subprocess
 import sys
@@ -94,16 +95,43 @@ def _keep_mic_active(pulse_source: str | None) -> None:
     log.warning("ReSpeaker PulseAudio source not found — mic may suspend between turns")
 
 
+def _sample_tegrastats() -> str:
+    """Return a one-line power+thermal summary from tegrastats."""
+    try:
+        proc = subprocess.Popen(
+            ["tegrastats"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+        )
+        line = proc.stdout.readline()
+        proc.terminate()
+        proc.wait()
+        vdd = re.search(r"VDD_IN (\d+)mW", line)
+        gpu_temp = re.search(r"gpu@([\d.]+)C", line)
+        cpu_temp = re.search(r"cpu@([\d.]+)C", line)
+        parts = []
+        if vdd:
+            parts.append(f"{int(vdd.group(1)):,}mW")
+        if cpu_temp:
+            parts.append(f"CPU {float(cpu_temp.group(1)):.0f}°C")
+        if gpu_temp:
+            parts.append(f"GPU {float(gpu_temp.group(1)):.0f}°C")
+        return "  ".join(parts) if parts else "n/a"
+    except Exception:
+        return "n/a"
+
+
 def stt_debug_print(audio: np.ndarray, transcript: str) -> None:
     duration = len(audio) / 16000
     rms = float(np.sqrt(np.mean(audio ** 2)))
     peak = float(np.max(np.abs(audio)))
     bar = "#" * min(40, int(rms * 800))
+    hw = _sample_tegrastats()
     print()
     print("┌─── STT DEBUG ──────────────────────────────────────┐")
     print(f"│  Duration : {duration:.2f}s")
     print(f"│  RMS      : {rms:.4f}  Peak: {peak:.4f}")
     print(f"│  Level    : [{bar:<40}]")
+    print(f"│  Hardware : {hw}")
     print(f"│  Transcript: {transcript!r}")
     print("└────────────────────────────────────────────────────┘")
     print()

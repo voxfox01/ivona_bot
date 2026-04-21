@@ -6,6 +6,36 @@ Running record of what was built, changed, and why. Newest entries at the top.
 
 ## Phase 3 — Conversational UX Improvements *(in progress)*
 
+### 2026-04-21 — Power and thermal monitoring in --debug-stt mode
+**Commit:** *(this commit)*
+
+**Problem observed:** Jetson reporting OC3 over-current throttling events (42 events on
+`/sys/class/hwmon/hwmon3/oc3_event_cnt`). OC3 is the VDD_IN system input rail — total board
+draw exceeding the PSU's current limit under peak LLM load.
+
+**Change:** Extended the `--debug-stt` output box with a live hardware line sampled from
+`tegrastats` after each utterance (just before LLM inference begins — near peak draw):
+
+```
+│  Hardware : 8,012mW  CPU 51°C  GPU 52°C
+```
+
+- `_sample_tegrastats()` spawns tegrastats, reads one line, terminates it immediately
+- Parses VDD_IN (total board power), cpu@ temperature, and gpu@ temperature
+- Falls back to "n/a" silently if tegrastats is unavailable
+- No sudo required — tegrastats is readable by normal users on JetPack
+
+**Diagnosis from OC event counters:**
+```
+oc1_event_cnt: 0   (VDD_CPU — fine)
+oc2_event_cnt: 0   (VDD_GPU — fine)
+oc3_event_cnt: 42  (VDD_IN  — PSU current limit hit)
+```
+Root cause: generic 5V/4A (20W) barrel-jack PSU insufficient for simultaneous LLM GPU inference
++ CPU + NVMe + USB ReSpeaker + Bluetooth A2DP. A 5V/5A+ supply should eliminate OC3 events.
+
+---
+
 ### Objective
 Close the experience gap between ivona_bot and commercial conversational robots (e.g., Reachy Mini).
 Reachy Mini achieves ~2–4s end-to-end latency using the OpenAI Realtime API (cloud). ivona_bot
