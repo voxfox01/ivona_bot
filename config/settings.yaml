@@ -14,20 +14,28 @@ wake_word:
   # Lower threshold = more sensitive, higher = fewer false positives
   # "hey jarvis" is a built-in openWakeWord model — replace with custom "hey ivona" once trained
 
+conversation:
+  session_timeout_seconds: 30     # silence duration before returning to wake word mode
+  session_start_phrase: "Yes?"    # spoken when wake word detected
+  session_end_phrase: "Goodbye!"  # spoken when session times out
+
 stt:
-  backend: "whisper_cpp"
-  whisper_cpp_binary: "whisper.cpp/build/bin/whisper-cli"
-  whisper_cpp_model: "models/STT/ggml-base.en.bin"
-  # whisper-cli runs CPU-only (CUDA disabled) so it doesn't compete with the
-  # resident LLM for GPU memory. base.en (142MB) fits comfortably alongside
-  # Qwen2.5-7B. Use ggml-small.en.bin for better accuracy if memory allows.
-  model_size: "base"              # used only if backend=faster_whisper
+  backend: "faster_whisper"        # in-process, model loaded once at startup (~1.8s load, ~0.1s inference)
+  model_size: "base"               # base=142MB CPU; small=466MB if accuracy insufficient
   model_dir: "models/STT/"
   language: "en"
-  device: "cpu"
+  device: "cpu"                    # CTranslate2 aarch64 PyPI wheel is CPU-only (no CUDA)
   compute_type: "int8"
   pulse_source: "alsa_input.usb-Seeed_Studio_reSpeaker_XVF3800_4-Mic_Array_114993702260500419-00.multichannel-input"
-  silence_threshold_seconds: 1.5
+  silence_threshold_seconds: 1.5   # used by fallback record_until_silence() only
+  # whisper_cpp fallback (kept for reference — use if faster_whisper accuracy is insufficient)
+  whisper_cpp_binary: "whisper.cpp/build/bin/whisper-cli"
+  whisper_cpp_model: "models/STT/ggml-base.en.bin"
+  # VAD settings (webrtcvad — used in conversation session mode)
+  vad:
+    aggressiveness: 3              # 0=least aggressive, 3=most aggressive noise filtering
+    speech_pad_ms: 300             # pre-roll buffer captured before speech onset
+    end_silence_ms: 900            # silence duration that ends an utterance
 
 llm:
   backend: "llama_cpp_python"     # "llama_cli" (subprocess) or "llama_cpp_python"

@@ -5,6 +5,9 @@ soundfile==0.13.1
 # Wake word detection
 openwakeword==0.6.0
 
+# Voice activity detection (VAD) — conversation session mode
+webrtcvad-wheels  # webrtcvad without the pkg_resources dependency (use this, not webrtcvad)
+
 # Utilities
 numpy
 python-dotenv
