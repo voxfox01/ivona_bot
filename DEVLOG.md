@@ -12,62 +12,101 @@ Reachy Mini achieves ~2–4s end-to-end latency using the OpenAI Realtime API (c
 currently takes ~12–15s and requires "hey jarvis" before every question. The goal is to reduce
 perceived latency and make multi-turn conversation feel natural — all while staying fully offline.
 
-### Planned improvements (in order of impact)
+### Improvements tracker
 
-| # | Improvement | Status | Target |
-|---|---|---|---|
-| 3.1 | Continuous VAD conversation mode — no wake word for follow-up questions | 🔲 Planned | 2026-05 |
-| 3.2 | In-process STT via faster-whisper — eliminate per-call model reload (~3s → ~1.5s) | 🔲 Planned | 2026-05 |
-| 3.3 | Word-level streaming TTS — first audio within ~500ms of LLM generating | 🔲 Planned | 2026-05 |
-| 3.4 | GStreamer audio pipeline — replace parecord polling with low-latency C pipeline | 🔲 Planned | 2026-05 |
-| 3.5 | Evaluate smaller/faster LLM (Qwen2.5-3B or TensorRT-LLM) | 🔲 Planned | 2026-06 |
+| # | Improvement | Status |
+|---|---|---|
+| 3.1 | Continuous VAD conversation mode — no wake word for follow-up questions | ✅ Complete |
+| 3.2 | In-process STT via faster-whisper — eliminate per-call model reload | ✅ Complete |
+| 3.3 | Persistent Piper TTS process — eliminate ~0.5s subprocess startup per utterance | ✅ Complete |
+| 3.4 | GStreamer audio pipeline — replace parecord polling with low-latency C pipeline | 🔲 Planned |
+| 3.5 | Evaluate smaller/faster LLM (Qwen2.5-3B or TensorRT-LLM) | 🔲 Planned |
 
-#### 3.1 — Continuous VAD conversation mode
-**Why:** Currently "hey jarvis" must be said before every question. Reachy Mini uses server-side
-VAD (OpenAI) to stay in an open listening session after activation. The equivalent for an offline
-system is `webrtcvad` (Google's WebRTC Voice Activity Detector — fast CPU, no model download).
+---
 
-**Design:**
-- First "hey jarvis" activates a conversation session
-- `webrtcvad` detects speech start/stop within the session
-- After each answer, re-enter listening mode without requiring a new wake word
-- Session ends after a configurable inactivity timeout (default 30s) and returns to wake word mode
+### 2026-04-21 — VAD multi-turn sessions, persistent TTS, mic muting
+**Commit:** `b1caa14`
 
-**Files to change:** `app/main.py`, `services/stt/transcriber.py`, `config/settings.yaml`
-**New dependency:** `webrtcvad`
+#### 3.1 — Continuous VAD conversation mode ✅
+**Implemented in:** `app/main.py`, `services/stt/transcriber.py`, `config/settings.yaml`, `requirements.txt`
 
-#### 3.2 — In-process STT via faster-whisper
-**Why:** `whisper-cli` is launched as a subprocess for every transcription. Each call loads the
-142MB model from disk (~2–3s overhead before any inference happens). Loading faster-whisper once
-at startup keeps the model resident and removes that cost entirely.
+Replaced the single-turn wake→STT→LLM→TTS→wake loop with a session model:
+- `run_conversation_session()` opens one persistent `parecord` stream per session
+- `webrtcvad` (Google's WebRTC VAD) detects each utterance within the session
+- After Ivona responds, listening resumes immediately — no wake word required for follow-ups
+- Session ends after 30s of silence (`session_timeout_seconds`); control returns to wake word mode
+- Session start/end spoken phrases configurable in `settings.yaml`
 
-**Constraint:** CTranslate2 on aarch64 via PyPI is CPU-only (no CUDA). For the base model on CPU,
-inference should take ~1–1.5s vs ~3s for the subprocess path. Memory impact: ~300MB resident vs
-~400MB peak per subprocess call — a net improvement.
+**VAD tuning to eliminate false triggers:**
+- Required 3 consecutive voiced frames (~90ms) before confirming speech onset
+- Added RMS gate (reject if RMS < 0.008) to filter ambient noise bursts that pass VAD
+- Pre-roll ring buffer (300ms) captures audio before detected onset so utterance start isn't clipped
+- End-of-utterance requires 900ms of consecutive silence
+- `webrtcvad-wheels` used instead of `webrtcvad` — avoids `pkg_resources` import error on Python 3.12+
 
-**Files to change:** `services/stt/transcriber.py`, `config/settings.yaml`, `requirements.txt`
+**Obstacle — VAD false-triggering on ambient noise:**
+First test captured 0.99s of silence (RMS=0.0084) as speech. Fixed by raising aggressiveness
+from 2 → 3 and adding the 3-frame onset + RMS gate combination.
 
-#### 3.3 — Word-level streaming TTS
-**Why:** Current TTS waits for a complete sentence before speaking (sentence-level streaming).
-Switching to word or short-phrase level would reduce time-to-first-audio from ~2–3s to ~500ms.
-Piper has per-invocation overhead that makes word-level chunking impractical as subprocesses.
-Plan: evaluate `kokoro-onnx` (Python-native, in-process, supports streaming) as a Piper replacement.
+#### 3.2 — In-process STT via faster-whisper ✅
+**Implemented in:** `services/stt/transcriber.py`, `config/settings.yaml`
 
-**Files to change:** `services/tts/speaker.py`, `config/settings.yaml`
-**New dependency:** `kokoro-onnx` (to evaluate)
+Switched active backend from `whisper_cpp` (subprocess) to `faster_whisper` (in-process):
+- `WhisperModel` loaded once at startup (1.2s), stays warm for the session lifetime
+- Per-utterance inference: ~0.1s on CPU for the base model (vs ~2–3s subprocess startup overhead)
+- `local_files_only=True` added to prevent a HuggingFace network call at startup — required for
+  offline conference deployment (was silently making an HTTP GET on every run)
+- `beam_size=1` (greedy decoding) for ~3× speed vs default beam_size=5 with negligible quality loss
+- `vad_filter=True` in transcribe() provides a second-pass noise filter inside faster-whisper
+
+#### 3.3 — Persistent Piper TTS process ✅
+**Implemented in:** `services/tts/speaker.py`
+
+Replaced the per-utterance Piper subprocess with a single persistent process:
+- Piper launched once with `--json-input` flag; stays alive between calls
+- Each synthesis request writes a JSON line to stdin: `{"text": "...", "output_file": "/tmp/x.wav"}`
+- Piper writes the output path to stdout as a completion signal; `readline()` blocks until done
+- WAV file read with soundfile and played via sounddevice; temp file cleaned up after each call
+- Eliminates ~0.5s subprocess startup cost per utterance
+
+**Obstacle — `--output-raw` approach broken:**
+First implementation used `--output-raw` with `select.select([stdout], [], [], 0.05)` to read PCM.
+The 50ms select timeout fired before Piper wrote any output, returning 0 bytes every time.
+Confirmed `--output-raw` worked in shell (`echo "text" | piper --output_raw | wc -c` → 67700 bytes)
+but the Python-side timing was unreliable. Switched to `--json-input` which provides a clean
+synchronization signal (stdout line) instead of a timeout-based read.
+
+#### Mic muting during TTS playback
+**Implemented in:** `app/main.py`
+
+**Problem observed:** After a long response, VAD immediately captured 3+ seconds of the bot's own
+voice as a new utterance. Root cause: `parecord` runs continuously and buffers audio into the pipe
+during TTS playback. When `record_with_vad()` is called next, it reads buffered echo instantly.
+
+**Fix:** Mute the PulseAudio mic source at the OS level during all TTS output:
+- `pactl set-source-mute <pulse_source> 1` before speaking
+- `pactl set-source-mute <pulse_source> 0` after speaking (in `finally` block)
+- `_drain_mic_pipe()` flushes any residual frames buffered at the moment of unmute
+- Applied to both the streaming response (`speak_streaming_muted`) and session phrases (`speak_muted`)
+
+**Session timeout fix:**
+`last_speech_time` was reset when the *user* spoke, not when Ivona finished. A long response
+(34s LLM + TTS) would trigger the 30s inactivity timeout immediately after speaking. Fixed by
+resetting `last_speech_time` after `speak_streaming_muted()` returns.
 
 #### 3.4 — GStreamer audio pipeline
-**Why:** parecord writes to a temp file which Python polls every 32ms. GStreamer (C library,
-pre-installed on Jetson JetPack) handles audio in a dedicated thread with configurable buffers as
-low as 5ms. This matches the approach used by Reachy Mini and eliminates the file I/O overhead.
+**Why:** parecord + pipe is working well; GStreamer would reduce audio capture latency further
+and remove the parecord subprocess dependency. Deferred — current latency is acceptable.
 
 **Files to change:** `services/stt/transcriber.py`, `services/wake_word/detector.py`
 **New dependency:** `PyGObject` (gi.repository.Gst — available on Jetson via apt)
 
 #### 3.5 — Smaller/faster LLM
-**Why:** LLM generation is the largest single latency contributor (~9s). Options:
+**Why:** LLM generation is the largest single latency contributor (~10–15s for longer answers).
+Options:
 - **Qwen2.5-3B Q4KM** (~2.2GB, ~4–5s generation) — straightforward model swap
-- **More GPU layers** — freeing STT memory (improvement 3.2) may allow raising from 20 → 28 layers
+- **More GPU layers** — with faster-whisper using less memory than whisper-cli, may allow raising
+  from 20 → 28 layers
 - **TensorRT-LLM** — NVIDIA's Jetson-optimized runtime, potentially 2–3x faster than llama.cpp;
   significant setup effort, Phase 4 candidate
 
