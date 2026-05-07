@@ -39,9 +39,13 @@ stt:
 
 llm:
   backend: "llama_cpp_python"     # "llama_cli" (subprocess) or "llama_cpp_python"
-  model_path: "models/LLM/qwen_2_5/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
-  n_gpu_layers: 20
-  # Safe limit is 20 with ggml-base STT co-resident. Max is 28 on 8GB Orin Nano.
+  model_path: "models/LLM/gemma_4/google_gemma-4-E2B-it-Q4_K_M.gguf"
+  chat_format: "gemma"            # "chatml" for Qwen/Mistral, "gemma" for Gemma models
+  n_gpu_layers: 99                # 2B model fits entirely on GPU — offload all layers
+  # To switch back to Qwen2.5-7B:
+  #   model_path: "models/LLM/qwen_2_5/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
+  #   chat_format: "chatml"
+  #   n_gpu_layers: 20
   context_length: 2048
   max_tokens: 512
   temperature: 0.7

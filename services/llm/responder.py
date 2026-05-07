@@ -13,7 +13,14 @@ _LLAMA_CLI = Path(__file__).resolve().parents[2] / "llama.cpp" / "build" / "bin"
 _LLAMA_LIB = str(_LLAMA_CLI.parent)
 
 
-def _build_prompt(system: str, user: str) -> str:
+def _build_prompt(system: str, user: str, chat_format: str = "chatml") -> str:
+    if chat_format == "gemma":
+        # Gemma instruct format — system prompt folded into first user turn
+        return (
+            f"<start_of_turn>user\n{system}\n\n{user}<end_of_turn>\n"
+            f"<start_of_turn>model\n"
+        )
+    # Default: ChatML (Qwen, Mistral, etc.)
     return (
         f"{_IM_START}system\n{system}{_IM_END}\n"
         f"{_IM_START}user\n{user}{_IM_END}\n"
@@ -30,10 +37,12 @@ class Responder:
         self._temperature = cfg.get("temperature", 0.7)
         self._system_prompt = cfg.get("system_prompt", "You are a helpful assistant.")
         self._backend = cfg.get("backend", "llama_cli")
+        self._chat_format = cfg.get("chat_format", "chatml")
 
         if self._backend == "llama_cpp_python":
             from llama_cpp import Llama
-            log.info("Loading LLM (llama-cpp-python) from %s ...", self._model_path.name)
+            log.info("Loading LLM (llama-cpp-python) from %s (format=%s)...",
+                     self._model_path.name, self._chat_format)
             self._llama = Llama(
                 model_path=str(self._model_path),
                 n_gpu_layers=self._n_gpu_layers,
@@ -47,7 +56,7 @@ class Responder:
             log.info("LLM using llama-cli subprocess: %s", self._model_path.name)
 
     def generate(self, user_text: str) -> str:
-        prompt = _build_prompt(self._system_prompt, user_text)
+        prompt = _build_prompt(self._system_prompt, user_text, self._chat_format)
         if self._backend == "llama_cpp_python":
             return self._generate_python(prompt)
         return self._generate_cli(prompt)
@@ -59,19 +68,23 @@ class Responder:
         pipe it to TTS while the model continues generating the next one.
         Falls back to a single chunk for the llama_cli backend.
         """
-        prompt = _build_prompt(self._system_prompt, user_text)
+        prompt = _build_prompt(self._system_prompt, user_text, self._chat_format)
         if self._backend == "llama_cpp_python":
             yield from self._stream_sentences_python(prompt)
         else:
             yield self._generate_cli(prompt)
 
+    def _stop_tokens(self) -> list[str]:
+        if self._chat_format == "gemma":
+            return ["<end_of_turn>", "<start_of_turn>"]
+        return [_IM_END, _IM_START]
+
     def _stream_sentences_python(self, prompt: str) -> Iterator[str]:
-        stop_tokens = [_IM_END, _IM_START]
         stream = self._llama(
             prompt,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
-            stop=stop_tokens,
+            stop=self._stop_tokens(),
             echo=False,
             stream=True,
         )
@@ -96,7 +109,7 @@ class Responder:
             prompt,
             max_tokens=self._max_tokens,
             temperature=self._temperature,
-            stop=[_IM_END, _IM_START],
+            stop=self._stop_tokens(),
             echo=False,
         )
         return output["choices"][0]["text"].strip()
@@ -129,7 +142,7 @@ class Responder:
                 "Check GPU memory — try reducing n_gpu_layers in config/settings.yaml."
             )
         text = result.stdout.strip()
-        for stop in (_IM_END, _IM_START):
+        for stop in self._stop_tokens():
             if stop in text:
                 text = text[:text.index(stop)]
         return text.strip()
