@@ -137,6 +137,30 @@ def stt_debug_print(audio: np.ndarray, transcript: str) -> None:
     print()
 
 
+def _clean_for_tts(text: str) -> str:
+    """Strip markdown and model-format tokens so Piper speaks natural text."""
+    # Model format tokens — defensive in case stop tokens miss a boundary
+    text = re.sub(r'<\|?(?:im_start|im_end)\|?>', '', text)
+    text = re.sub(r'<(?:start|end)_of_turn>', '', text)
+    # Markdown links: [label](url) → label
+    text = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    # Headings: leading # symbols
+    text = re.sub(r'^\s*#{1,6}\s+', '', text, flags=re.MULTILINE)
+    # Bold / italic: **text**, *text*, __text__, _text_
+    text = re.sub(r'\*{1,2}([^*]+?)\*{1,2}', r'\1', text)
+    text = re.sub(r'_{1,2}([^_]+?)_{1,2}', r'\1', text)
+    # Inline code: `text`
+    text = re.sub(r'`([^`]*)`', r'\1', text)
+    # Bullet / list markers at line start
+    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)
+    # Emoji and miscellaneous Unicode symbols
+    text = re.sub(r'[\U0001F000-\U0001FFFF]', '', text)
+    text = re.sub(r'[☀-➿]', '', text)
+    # Collapse internal newlines to a space
+    text = re.sub(r'\s*\n\s*', ' ', text)
+    return text.strip()
+
+
 def _set_mic_mute(pulse_source: str | None, mute: bool) -> None:
     """Mute or unmute the PulseAudio mic source via pactl."""
     if not pulse_source:
@@ -184,7 +208,7 @@ def speak_streaming(llm, tts, transcript: str, log) -> str:
             break
         full_response.append(sentence)
         try:
-            tts.speak(sentence)
+            tts.speak(_clean_for_tts(sentence))
         except Exception as exc:
             log.error("TTS error: %s", exc)
 
