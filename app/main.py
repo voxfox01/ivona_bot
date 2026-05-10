@@ -203,6 +203,8 @@ def run_conversation_session(stt, llm, tts, cfg, pulse_source: str | None,
     timeout_seconds = conv_cfg.get("session_timeout_seconds", 30)
     end_phrase = conv_cfg.get("session_end_phrase", "Goodbye!")
 
+    llm.reset_session()
+
     def speak_muted(text: str) -> None:
         """Mute mic, speak, unmute, then drain any residual pipe audio."""
         _set_mic_mute(pulse_source, mute=True)

@@ -50,15 +50,23 @@ class Responder:
                 verbose=False,
             )
             log.info("LLM loaded.")
+            from services.llm.conversation import ConversationGraph
+            self._conversation = ConversationGraph(self._llama, cfg)
         else:
+            self._conversation = None
             if not _LLAMA_CLI.exists():
                 raise FileNotFoundError(f"llama-cli not found at {_LLAMA_CLI}")
             log.info("LLM using llama-cli subprocess: %s", self._model_path.name)
 
+    def reset_session(self) -> None:
+        """Start a fresh conversation thread (call at each wake-word activation)."""
+        if self._conversation is not None:
+            self._conversation.reset_session()
+
     def generate(self, user_text: str) -> str:
+        if self._conversation is not None:
+            return self._conversation.generate(user_text)
         prompt = _build_prompt(self._system_prompt, user_text, self._chat_format)
-        if self._backend == "llama_cpp_python":
-            return self._generate_python(prompt)
         return self._generate_cli(prompt)
 
     def stream_sentences(self, user_text: str) -> Iterator[str]:
@@ -68,10 +76,10 @@ class Responder:
         pipe it to TTS while the model continues generating the next one.
         Falls back to a single chunk for the llama_cli backend.
         """
-        prompt = _build_prompt(self._system_prompt, user_text, self._chat_format)
-        if self._backend == "llama_cpp_python":
-            yield from self._stream_sentences_python(prompt)
+        if self._conversation is not None:
+            yield from self._conversation.stream_sentences(user_text)
         else:
+            prompt = _build_prompt(self._system_prompt, user_text, self._chat_format)
             yield self._generate_cli(prompt)
 
     def _stop_tokens(self) -> list[str]:

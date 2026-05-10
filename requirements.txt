@@ -14,6 +14,10 @@ python-dotenv
 PyYAML
 huggingface_hub
 
+# Conversation memory
+langgraph>=1.1.0
+langchain-core>=0.3.0
+
 # --- Optional / alternative backends ---
 # faster-whisper (CPU-only on aarch64 — no CUDA via PyPI):
 #   pip install faster-whisper==1.2.1

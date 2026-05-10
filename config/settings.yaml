@@ -42,6 +42,7 @@ llm:
   model_path: "models/LLM/gemma_4/google_gemma-4-E2B-it-Q4_K_M.gguf"
   chat_format: "gemma"            # "chatml" for Qwen/Mistral, "gemma" for Gemma models
   n_gpu_layers: 99                # 2B model fits entirely on GPU — offload all layers
+  max_history_turns: 5            # sliding window of prior turns included in context
   # To switch back to Qwen2.5-7B:
   #   model_path: "models/LLM/qwen_2_5/qwen2.5-7b-instruct-q4_k_m-00001-of-00002.gguf"
   #   chat_format: "chatml"
